@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">
+  <channel>
+    <title>Deep Dive Devotions</title>
+    <link>https://github.com/andrewosborne918/DeepDiveDevotions</link>
+    <description>Daily devotional content</description>
+    <language>en-us</language>
+    <atom:link href="https://raw.githubusercontent.com/andrewosborne918/DeepDiveDevotions/main/feed.xml" rel="self" type="application/rss+xml"/>
+  </channel>
+</rss>
