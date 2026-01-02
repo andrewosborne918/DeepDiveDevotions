@@ -2,6 +2,7 @@
 import os
 import json
 import sys
+import traceback
 from datetime import datetime
 from typing import List, Dict
 
@@ -133,7 +134,6 @@ def main():
         process_devotions(config)
     except Exception as e:
         print(f"Error processing devotions: {e}")
-        import traceback
         traceback.print_exc()
         sys.exit(1)
 

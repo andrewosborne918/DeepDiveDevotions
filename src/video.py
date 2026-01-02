@@ -74,11 +74,13 @@ class VideoProcessor:
         Returns:
             HTML embed code
         """
-        embed_code = f'''<iframe width="{width}" height="{height}" 
-src="https://www.youtube.com/embed/{video_id}" 
-frameborder="0" 
-allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" 
-allowfullscreen></iframe>'''
+        embed_code = (
+            f'<iframe width="{width}" height="{height}" '
+            f'src="https://www.youtube.com/embed/{video_id}" '
+            f'frameborder="0" '
+            f'allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" '
+            f'allowfullscreen></iframe>'
+        )
         
         return embed_code
     

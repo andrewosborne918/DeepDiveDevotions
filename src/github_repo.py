@@ -1,6 +1,7 @@
 """GitHub repository integration for DeepDiveDevotions."""
 import os
 import json
+import base64
 from typing import Optional, Dict, Any
 import requests
 
@@ -41,7 +42,6 @@ class GitHubRepo:
         response = requests.get(url, headers=self.headers, params=params)
         
         if response.status_code == 200:
-            import base64
             content = response.json().get('content', '')
             return base64.b64decode(content).decode('utf-8')
         else:
@@ -62,8 +62,6 @@ class GitHubRepo:
         Returns:
             True if successful, False otherwise
         """
-        import base64
-        
         url = f"{self.base_url}/repos/{self.repo}/contents/{path}"
         
         # Get current file SHA if not provided

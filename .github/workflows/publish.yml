@@ -31,7 +31,7 @@ jobs:
       - name: Run devotions processor
         env:
           SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
-          SHEET_NAME: ${{ vars.SHEET_NAME || 'Devotions' }}
+          SHEET_NAME: ${{ vars.SHEET_NAME }}
           DRIVE_FOLDER_ID: ${{ secrets.DRIVE_FOLDER_ID }}
           GCS_BUCKET_NAME: ${{ secrets.GCS_BUCKET_NAME }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
