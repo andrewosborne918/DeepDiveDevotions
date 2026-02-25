@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<rss version="2.0"
+    xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd" 
+    xmlns:content="http://purl.org/rss/1.0/modules/content/"
+    xmlns:atom="http://www.w3.org/2005/Atom">
+<channel>
+  <atom:link href="https://storage.googleapis.com/deep-dive-podcast-assets/rss.xml" rel="self" type="application/rss+xml"/>
+  <title>Deep Dive Devotions</title>
+  <link>https://ko-fi.com/deepdivedevotions</link>
+  <description>A daily Bible podcast exploring one chapter of Scripture at a time—depth, context, and application for everyday faith.</description>
+  <language>en-us</language>
+  
+  <itunes:author>Deep Dive Devotions</itunes:author>
+  <itunes:owner>
+    <itunes:name>Deep Dive Devotions</itunes:name>
+    <itunes:email>info.deepdivedevotions@gmail.com</itunes:email>
+  </itunes:owner>
+  <itunes:image href="https://storage.googleapis.com/deep-dive-podcast-assets/PodcastImage_1x1.png"/>
+
+<item>
+  <title>Deep Dive Devotion Trailer</title>
+  <description>Welcome to the Deep Dive Devotion podcast.</description>
+  <pubDate>Tue, 24 Feb 2026 04:30:00 EST</pubDate>
+  <enclosure url="URL_TO_A_TEST_MP3_IN_YOUR_BUCKET" length="1024" type="audio/mpeg"/>
+  <guid isPermaLink="false">devotion_000</guid>
+  <itunes:duration>00:30</itunes:duration>
+  <itunes:explicit>false</itunes:explicit>
+</item>
+
+</channel>
+</rss>
