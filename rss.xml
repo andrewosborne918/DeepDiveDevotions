@@ -16,6 +16,7 @@
     <itunes:email>info.deepdivedevotions@gmail.com</itunes:email>
   </itunes:owner>
   <itunes:image href="https://storage.googleapis.com/deep-dive-podcast-assets/PodcastImage_1x1.png"/>
+  <itunes:category text="Christianity" />
 
 <item>
   <title>Deep Dive Devotion Trailer</title>
