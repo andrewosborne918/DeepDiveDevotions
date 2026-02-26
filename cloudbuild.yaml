@@ -11,4 +11,4 @@ options:
   logging: CLOUD_LOGGING_ONLY
 
 substitutions:
-  _IMAGE: "us-central1-docker.pkg.dev/$PROJECT_ID/deep-dive-devotions/deep-dive-devotions:$SHORT_SHA"
+  _IMAGE: "us-central1-docker.pkg.dev/${PROJECT_ID}/deep-dive-devotions/deep-dive-devotions:${SHORT_SHA}"
