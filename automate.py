@@ -62,8 +62,8 @@ def col_to_a1(col_index_0_based: int) -> str:
 
 
 def drive_find_file_id(drive_svc, parent_folder_id: str, filename: str) -> str:
-    # Escape single quotes in query string
-    safe_name = filename.replace("'", "\\'")
+    # Drive query escaping uses doubled single quotes
+    safe_name = filename.replace("'", "''")
     q = f"name = '{safe_name}' and '{parent_folder_id}' in parents and trashed = false"
     res = drive_svc.files().list(q=q, fields="files(id,name)", pageSize=1).execute()
     files = res.get("files", [])
@@ -135,7 +135,6 @@ def main():
     sheets_svc = build("sheets", "v4", credentials=creds)
     drive_svc = build("drive", "v3", credentials=creds)
 
-    # Storage client will also use creds (explicit to avoid surprises)
     storage_client = storage.Client(credentials=creds)
     bucket = storage_client.bucket(BUCKET_NAME)
 
@@ -159,13 +158,13 @@ def main():
     COL_DESC = pick_existing_header(col_index, "Description", "description")
     COL_FILE = pick_existing_header(col_index, "File Name", "FileName", "Filename", "file_name")
     COL_PROCESSED = pick_existing_header(col_index, "Processed", "processed", "Status", "status")
-    # Your sheet looks like it uses Image16x9FileId or Image16x9FileId/Field; accept a few:
+
     COL_IMAGE_16x9 = pick_existing_header(
         col_index,
         "Image16x9FileId",
         "Image16x9FileID",
         "Image16x9FileIdField",
-        "Image16x9FileIdFiled",  # just in case of a common typo
+        "Image16x9FileIdFiled",
         "Image16x9FileIdFieldId",
         "Image16x9FileIdFieldID",
     )
@@ -184,7 +183,6 @@ def main():
         try:
             pub = parse_publish_date(publish_raw)
         except ValueError:
-            # Skip rows with invalid date format
             continue
 
         processed_val = (row[col_index[COL_PROCESSED]] or "").strip().lower()
@@ -224,16 +222,14 @@ def main():
     run_ffmpeg(local_image, local_audio, local_video)
 
     # Upload artifacts to bucket
-    # Use a safe path that is unique per day
     audio_blob_name = f"{BUCKET_EPISODES_PREFIX}/{today.isoformat()}/{filename}"
     video_blob_name = f"{BUCKET_EPISODES_PREFIX}/{today.isoformat()}/video.mp4"
 
     blob_audio = bucket.blob(audio_blob_name)
-    blob_audio.upload_from_filename(local_audio, content_type="audio/mp4")
+    blob_audio.upload_from_filename(local_audio, content_type="audio/x-m4a")
     try:
         blob_audio.make_public()
     except Exception:
-        # If uniform public access is used, this may fail; public URL can still work if bucket is public.
         pass
 
     blob_video = bucket.blob(video_blob_name)
@@ -243,7 +239,7 @@ def main():
     except Exception:
         pass
 
-    # Update RSS (download existing rss.xml, add <item>, upload back)
+    # Update RSS
     rss_blob = bucket.blob(RSS_BLOB_NAME)
     rss_xml = rss_blob.download_as_text()
 
@@ -255,16 +251,13 @@ def main():
     item = ET.Element("item")
     ET.SubElement(item, "title").text = title
     ET.SubElement(item, "description").text = description
-
-    # RFC 2822 / email.utils formatting; use UTC with tzinfo
     ET.SubElement(item, "pubDate").text = format_datetime(datetime.now(timezone.utc))
 
     enclosure = ET.SubElement(item, "enclosure")
     enclosure.set("url", blob_audio.public_url)
     enclosure.set("length", str(os.path.getsize(local_audio)))
-    enclosure.set("type", "audio/mp4")
+    enclosure.set("type", "audio/x-m4a")
 
-    # Optional but good practice: stable GUID
     guid = ET.SubElement(item, "guid")
     guid.set("isPermaLink", "false")
     guid.text = f"dddevotion-{today.isoformat()}-{filename}"
@@ -278,7 +271,7 @@ def main():
     except Exception:
         pass
 
-    # Mark only the Processed column as "yes" (avoids overwriting the whole row)
+    # Mark only the Processed column as "yes"
     processed_col_letter = col_to_a1(col_index[COL_PROCESSED])
     sheets_svc.spreadsheets().values().update(
         spreadsheetId=SPREADSHEET_ID,
