@@ -1,8 +1,14 @@
 steps:
-  - name: 'gcr.io/cloud-builders/docker'
-    args: ['build', '-t', '${_IMAGE}', '.']
-  - name: 'gcr.io/cloud-builders/docker'
-    args: ['push', '${_IMAGE}']
+  - name: "gcr.io/cloud-builders/docker"
+    args: ["build", "-t", "${_IMAGE}", "."]
+  - name: "gcr.io/cloud-builders/docker"
+    args: ["push", "${_IMAGE}"]
 
 images:
-  - '${_IMAGE}'
+  - "${_IMAGE}"
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+
+substitutions:
+  _IMAGE: "us-central1-docker.pkg.dev/$PROJECT_ID/deep-dive-devotions/deep-dive-devotions:$SHORT_SHA"
