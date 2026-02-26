@@ -223,7 +223,8 @@ def main():
 
     # Upload artifacts to bucket
     audio_blob_name = f"{BUCKET_EPISODES_PREFIX}/{today.isoformat()}/{filename}"
-    video_blob_name = f"{BUCKET_EPISODES_PREFIX}/{today.isoformat()}/video.mp4"
+    video_filename = filename.rsplit(".", 1)[0] + ".mp4"   # "1 Genesis 1.mp4"
+    video_blob_name = f"{BUCKET_EPISODES_PREFIX}/{today.isoformat()}/{video_filename}"
 
     blob_audio = bucket.blob(audio_blob_name)
     blob_audio.upload_from_filename(local_audio, content_type="audio/x-m4a")
