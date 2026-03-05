@@ -1,14 +1,25 @@
 steps:
+  # Build automate job image (repo root)
   - name: "gcr.io/cloud-builders/docker"
-    args: ["build", "-t", "${_IMAGE}", "."]
+    args: ["build", "-t", "${_AUTOMATE_IMAGE}", "."]
+
   - name: "gcr.io/cloud-builders/docker"
-    args: ["push", "${_IMAGE}"]
+    args: ["push", "${_AUTOMATE_IMAGE}"]
+
+  # Build social publish image (social-publish folder)
+  - name: "gcr.io/cloud-builders/docker"
+    args: ["build", "-t", "${_SOCIAL_IMAGE}", "./social-publish"]
+
+  - name: "gcr.io/cloud-builders/docker"
+    args: ["push", "${_SOCIAL_IMAGE}"]
 
 images:
-  - "${_IMAGE}"
+  - "${_AUTOMATE_IMAGE}"
+  - "${_SOCIAL_IMAGE}"
 
 options:
   logging: CLOUD_LOGGING_ONLY
 
 substitutions:
-  _IMAGE: "us-east5-docker.pkg.dev/${PROJECT_ID}/deep-dive-devotions/deep-dive-devotions:${SHORT_SHA}"
+  _AUTOMATE_IMAGE: "us-east5-docker.pkg.dev/${PROJECT_ID}/deep-dive-devotions/deep-dive-devotions:${SHORT_SHA}"
+  _SOCIAL_IMAGE: "us-east5-docker.pkg.dev/${PROJECT_ID}/deep-dive-devotions/deep-dive-social-publish:${SHORT_SHA}"
