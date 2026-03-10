@@ -153,7 +153,13 @@ def fb_upload_video_native(message: str, video_file_path: str) -> str:
             "access_token": META_PAGE_ACCESS_TOKEN,
         }
         r = requests.post(url, data=data, files=files, timeout=300)
-        r.raise_for_status()
+        if not r.ok:
+            print("FB upload failed:", r.status_code)
+            try:
+                print("FB response text:", r.text)
+            except Exception:
+                pass
+            r.raise_for_status()
         return r.json().get("id", "")
 
 
@@ -168,7 +174,13 @@ def fb_post_link(message: str, link: str) -> str:
         "access_token": META_PAGE_ACCESS_TOKEN,
     }
     r = requests.post(url, data=payload, timeout=45)
-    r.raise_for_status()
+    if not r.ok:
+        print("FB upload failed:", r.status_code)
+        try:
+            print("FB response text:", r.text)
+        except Exception:
+            pass
+        r.raise_for_status()
     return r.json().get("id", "")
 
 
