@@ -1,5 +1,6 @@
 import os
 import io
+import time
 import json
 import requests
 import google.auth
@@ -25,7 +26,7 @@ SHEET_NAME = os.getenv("SHEET_NAME", "Main Schedule")
 
 DATE_OVERRIDE = os.getenv("DATE_OVERRIDE")  # YYYY-MM-DD (optional)
 
-# Facebook Page (native upload)
+# Facebook Page
 META_PAGE_ID = os.getenv("META_PAGE_ID")
 META_PAGE_ACCESS_TOKEN = os.getenv("META_PAGE_ACCESS_TOKEN")
 FB_MODE = os.getenv("FB_MODE", "native").strip().lower()  # native | link
@@ -86,7 +87,6 @@ def try_header(col_index: Dict[str, int], *candidates: str) -> Optional[str]:
 # GCS helpers
 # -----------------------------
 def gcs_public_url(bucket: str, object_name: str) -> str:
-    # URL-encode the object path (spaces, etc.)
     return f"https://storage.googleapis.com/{bucket}/{quote(object_name, safe='/')}"
 
 
@@ -138,29 +138,153 @@ def upload_to_youtube(yt, video_path: str, title: str, description: str, privacy
 
 
 # -----------------------------
+# Facebook helpers
+# -----------------------------
+def _fb_log_response(prefix: str, response: requests.Response):
+    print(f"{prefix}: status={response.status_code}")
+    try:
+        print(f"{prefix}: body={response.text}")
+    except Exception:
+        pass
+
+
+def _fb_raise_for_status(response: requests.Response, context: str):
+    if response.ok:
+        return
+    _fb_log_response(context, response)
+    response.raise_for_status()
+
+
+# -----------------------------
 # Facebook Page native upload
+# Resumable/chunked upload
 # -----------------------------
 def fb_upload_video_native(message: str, video_file_path: str) -> str:
     if not META_PAGE_ID or not META_PAGE_ACCESS_TOKEN:
         raise RuntimeError("Missing META_PAGE_ID / META_PAGE_ACCESS_TOKEN.")
 
-    url = f"https://graph.facebook.com/v19.0/{META_PAGE_ID}/videos"
+    if not os.path.exists(video_file_path):
+        raise RuntimeError(f"Video file not found: {video_file_path}")
+
+    file_size = os.path.getsize(video_file_path)
+    print(f"[FB] Preparing native upload: {video_file_path}")
+    print(f"[FB] File size: {file_size} bytes ({file_size / (1024 * 1024):.2f} MB)")
+
+    url = f"https://graph-video.facebook.com/v19.0/{META_PAGE_ID}/videos"
+    session = requests.Session()
+
+    # Phase 1: start
+    start_resp = session.post(
+        url,
+        data={
+            "access_token": META_PAGE_ACCESS_TOKEN,
+            "upload_phase": "start",
+            "file_size": str(file_size),
+        },
+        timeout=120,
+    )
+    _fb_raise_for_status(start_resp, "[FB] start phase failed")
+
+    start_json = start_resp.json()
+    upload_session_id = start_json["upload_session_id"]
+    video_id = start_json["video_id"]
+    start_offset = int(start_json["start_offset"])
+    end_offset = int(start_json["end_offset"])
+
+    print(f"[FB] upload_session_id={upload_session_id}")
+    print(f"[FB] video_id={video_id}")
+    print(f"[FB] initial offsets: start={start_offset}, end={end_offset}")
+
+    # Phase 2: transfer
+    retry_budget = 5
+
     with open(video_file_path, "rb") as f:
-        files = {"source": f}
-        data = {
+        while True:
+            if start_offset == end_offset:
+                break
+
+            chunk_size = end_offset - start_offset
+            f.seek(start_offset)
+            chunk = f.read(chunk_size)
+
+            if not chunk:
+                raise RuntimeError(
+                    f"[FB] Failed to read chunk for upload. start_offset={start_offset}, end_offset={end_offset}"
+                )
+
+            transfer_resp = session.post(
+                url,
+                data={
+                    "access_token": META_PAGE_ACCESS_TOKEN,
+                    "upload_phase": "transfer",
+                    "upload_session_id": upload_session_id,
+                    "start_offset": str(start_offset),
+                },
+                files={
+                    "video_file_chunk": (
+                        os.path.basename(video_file_path),
+                        chunk,
+                        "application/octet-stream",
+                    )
+                },
+                timeout=300,
+            )
+
+            if transfer_resp.ok:
+                transfer_json = transfer_resp.json()
+                start_offset = int(transfer_json["start_offset"])
+                end_offset = int(transfer_json["end_offset"])
+                print(f"[FB] transferred chunk, next offsets: start={start_offset}, end={end_offset}")
+                continue
+
+            _fb_log_response("[FB] transfer phase failed", transfer_resp)
+
+            error_json = {}
+            try:
+                error_json = transfer_resp.json()
+            except Exception:
+                error_json = {}
+
+            error = error_json.get("error", {}) if isinstance(error_json, dict) else {}
+            error_data = error.get("error_data", {}) if isinstance(error, dict) else {}
+
+            corrected_start = error_data.get("start_offset")
+            corrected_end = error_data.get("end_offset")
+            is_transient = bool(error.get("is_transient"))
+
+            if corrected_start is not None and corrected_end is not None and retry_budget > 0:
+                start_offset = int(corrected_start)
+                end_offset = int(corrected_end)
+                retry_budget -= 1
+                print(f"[FB] corrected offsets from API, retrying: start={start_offset}, end={end_offset}")
+                continue
+
+            if is_transient and retry_budget > 0:
+                retry_budget -= 1
+                print("[FB] transient transfer error, sleeping 2 seconds and retrying")
+                time.sleep(2)
+                continue
+
+            transfer_resp.raise_for_status()
+
+    # Phase 3: finish
+    finish_resp = session.post(
+        url,
+        data={
+            "access_token": META_PAGE_ACCESS_TOKEN,
+            "upload_phase": "finish",
+            "upload_session_id": upload_session_id,
             "description": message,
             "published": "true",
-            "access_token": META_PAGE_ACCESS_TOKEN,
-        }
-        r = requests.post(url, data=data, files=files, timeout=300)
-        if not r.ok:
-            print("FB upload failed:", r.status_code)
-            try:
-                print("FB response text:", r.text)
-            except Exception:
-                pass
-            r.raise_for_status()
-        return r.json().get("id", "")
+        },
+        timeout=120,
+    )
+    _fb_raise_for_status(finish_resp, "[FB] finish phase failed")
+
+    finish_json = finish_resp.json()
+    print(f"[FB] finish response: {finish_json}")
+
+    return finish_json.get("id") or video_id
 
 
 def fb_post_link(message: str, link: str) -> str:
@@ -175,7 +299,7 @@ def fb_post_link(message: str, link: str) -> str:
     }
     r = requests.post(url, data=payload, timeout=45)
     if not r.ok:
-        print("FB upload failed:", r.status_code)
+        print("FB link post failed:", r.status_code)
         try:
             print("FB response text:", r.text)
         except Exception:
@@ -201,7 +325,6 @@ def main():
     storage_client = storage.Client(credentials=adc_creds)
     bucket = storage_client.bucket(BUCKET_NAME)
 
-    # Read sheet
     resp = sheets.spreadsheets().values().get(
         spreadsheetId=SHEET_ID,
         range=f"'{SHEET_NAME}'!A1:Z"
@@ -215,21 +338,18 @@ def main():
     headers = values[0]
     col_index = {h.strip(): i for i, h in enumerate(headers)}
 
-    # Required inputs
     COL_PUBLISH = pick_existing_header(col_index, "Publish Date", "PublishDate", "publish_date")
     COL_TITLE = pick_existing_header(col_index, "Title", "title")
     COL_DESC = pick_existing_header(col_index, "Description", "description")
     COL_FILE = pick_existing_header(col_index, "File Name", "FileName", "Filename", "file_name")
     COL_PROCESSED = pick_existing_header(col_index, "Processed", "processed", "Status", "status")
 
-    # Outputs (recommended columns)
     COL_SOCIAL_POST = try_header(col_index, "SocialPost", "Social Post", "social_post")
     COL_VIDEO_URL = try_header(col_index, "VideoURL", "Video Url", "video_url")
     COL_YT_URL = try_header(col_index, "YouTubeURL", "YoutubeURL", "youtube_url", "YouTube Url")
     COL_FB_ID = try_header(col_index, "FacebookPostId", "Facebook Post Id", "facebook_post_id")
     COL_SOCIAL_PUBLISHED = try_header(col_index, "SocialPublished", "Social Published", "social_published")
 
-    # Find all rows for today that are processed and not social-published yet
     candidates: List[Tuple[int, List[str]]] = []
     for r in range(1, len(values)):
         row = values[r] + [""] * (len(headers) - len(values[r]))
@@ -254,7 +374,6 @@ def main():
         print(f"No rows to publish for {today_iso}.")
         return
 
-    # YouTube client (optional: only if vars exist)
     yt = None
     yt_enabled = all([YOUTUBE_CLIENT_ID, YOUTUBE_CLIENT_SECRET, YOUTUBE_REFRESH_TOKEN])
     if yt_enabled:
@@ -270,7 +389,7 @@ def main():
         audio_filename = (row[col_index[COL_FILE]] or "").strip()
 
         if not title or not audio_filename:
-            print(f"Skipping row {row_idx+1}: missing title or file name.")
+            print(f"Skipping row {row_idx + 1}: missing title or file name.")
             continue
 
         video_object = derive_video_object(today_iso, audio_filename)
@@ -278,8 +397,11 @@ def main():
         if not blob.exists(storage_client):
             raise RuntimeError(f"Expected video not found: gs://{BUCKET_NAME}/{video_object}")
 
-        local_video = f"/tmp/dd/{row_idx+1}.mp4"
+        local_video = f"/tmp/dd/{row_idx + 1}.mp4"
         blob.download_to_filename(local_video)
+
+        local_size = os.path.getsize(local_video)
+        print(f"Downloaded video for row {row_idx + 1}: {local_video} ({local_size / (1024 * 1024):.2f} MB)")
 
         gcs_video_url = gcs_public_url(BUCKET_NAME, video_object)
 
@@ -293,24 +415,25 @@ def main():
                 privacy_status=YOUTUBE_PRIVACY_STATUS
             )
 
-        # Social post text (simple; customize later)
         if yt_url:
             social_post = f"{title}\n\nWatch on YouTube: {yt_url}"
         else:
             social_post = f"{title}\n\nNew video is up!"
 
-        # Facebook publish
         if FB_MODE == "native":
-            fb_id = fb_upload_video_native(message=social_post, video_file_path=local_video)
+            try:
+                fb_id = fb_upload_video_native(message=social_post, video_file_path=local_video)
+            except Exception as e:
+                print(f"[FB] Native upload failed, falling back to link mode: {e}")
+                fb_link = yt_url or gcs_video_url
+                fb_id = fb_post_link(message=social_post, link=fb_link)
         else:
-            # link mode posts the YouTube link if available, otherwise the GCS public URL
             fb_link = yt_url or gcs_video_url
             fb_id = fb_post_link(message=social_post, link=fb_link)
 
-        # Update sheet cells (if columns exist)
         def update_cell(col_name: str, value: str):
             col_letter = col_to_a1(col_index[col_name])
-            a1 = f"'{SHEET_NAME}'!{col_letter}{row_idx+1}"
+            a1 = f"'{SHEET_NAME}'!{col_letter}{row_idx + 1}"
             sheets.spreadsheets().values().update(
                 spreadsheetId=SHEET_ID,
                 range=a1,
@@ -329,7 +452,7 @@ def main():
         if COL_SOCIAL_PUBLISHED:
             update_cell(COL_SOCIAL_PUBLISHED, "yes")
 
-        print(f"Published row {row_idx+1}: {title}")
+        print(f"Published row {row_idx + 1}: {title}")
         print("  GCS:", gcs_video_url)
         if yt_url:
             print("  YouTube:", yt_url)
