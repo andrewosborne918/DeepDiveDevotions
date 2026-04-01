@@ -17,6 +17,9 @@ from google.cloud import storage
 EPISODES_FOLDER_ID = os.getenv("DAILY_FOLDER_ID") or os.getenv("EPISODES_FOLDER_ID")
 BOOK_INTRO_FOLDER_ID = os.getenv("BOOK_INTRO_FOLDER_ID")  # optional (not used in this script yet)
 
+THUMBNAILS_FOLDER_ID = os.getenv("THUMBNAILS_FOLDER_ID")
+FALLBACK_IMAGE_FILE_ID = os.getenv("FALLBACK_IMAGE_FILE_ID")
+
 BUCKET_NAME = os.getenv("RSS_BUCKET") or os.getenv("BUCKET_NAME", "deep-dive-podcast-assets")
 RSS_BLOB_NAME = os.getenv("RSS_OBJECT") or os.getenv("RSS_BLOB_NAME", "rss.xml")
 BUCKET_EPISODES_PREFIX = os.getenv("BUCKET_EPISODES_PREFIX", "episodes")
@@ -72,6 +75,19 @@ def drive_find_file_id(drive_svc, parent_folder_id: str, filename: str) -> str:
     return files[0]["id"]
 
 
+def drive_find_file_id_optional(drive_svc, parent_folder_id: str, filename: str):
+    if not parent_folder_id or not filename:
+        return None
+
+    safe_name = filename.replace("'", "''")
+    q = f"name = '{safe_name}' and '{parent_folder_id}' in parents and trashed = false"
+    res = drive_svc.files().list(q=q, fields="files(id,name)", pageSize=1).execute()
+    files = res.get("files", [])
+    if not files:
+        return None
+    return files[0]["id"]
+
+
 def drive_download_file(drive_svc, file_id: str, out_path: str):
     request = drive_svc.files().get_media(fileId=file_id)
     with io.FileIO(out_path, "wb") as fh:
@@ -79,6 +95,36 @@ def drive_download_file(drive_svc, file_id: str, out_path: str):
         done = False
         while not done:
             _, done = downloader.next_chunk()
+
+
+def resolve_thumbnail_file_id(
+    drive_svc,
+    thumbnails_folder_id: str,
+    thumbnail_filename: str,
+    image16x9_id: str,
+    fallback_image_file_id: str,
+) -> str:
+    # 1) First try exact filename match from the sheet's Thumbnail column in the Drive Thumbnails folder
+    if thumbnails_folder_id and thumbnail_filename:
+        matched_id = drive_find_file_id_optional(drive_svc, thumbnails_folder_id, thumbnail_filename)
+        if matched_id:
+            print(f"Using thumbnail from Drive folder match: {thumbnail_filename}")
+            return matched_id
+        print(f"No Drive thumbnail match found for: {thumbnail_filename}")
+
+    # 2) Then try Image16x9FileId from the sheet
+    if image16x9_id:
+        print("Using Image16x9FileId from sheet.")
+        return image16x9_id
+
+    # 3) Finally use a fallback image
+    if fallback_image_file_id:
+        print("Using fallback image file id.")
+        return fallback_image_file_id
+
+    raise RuntimeError(
+        "No thumbnail source available. Checked Thumbnail folder match, Image16x9FileId, and FALLBACK_IMAGE_FILE_ID."
+    )
 
 
 def run_ffmpeg(image_path: str, audio_path: str, out_video_path: str):
@@ -126,6 +172,11 @@ def main():
     if not BUCKET_NAME:
         raise RuntimeError("Missing bucket name. Set RSS_BUCKET (or BUCKET_NAME).")
 
+    if not THUMBNAILS_FOLDER_ID:
+        print("THUMBNAILS_FOLDER_ID not set. Thumbnail folder matching will be skipped.")
+    if not FALLBACK_IMAGE_FILE_ID:
+        print("FALLBACK_IMAGE_FILE_ID not set. No final image fallback is configured.")
+
     if DATE_OVERRIDE:
         today = parse_publish_date(DATE_OVERRIDE)
     else:
@@ -158,6 +209,13 @@ def main():
     COL_DESC = pick_existing_header(col_index, "Description", "description")
     COL_FILE = pick_existing_header(col_index, "File Name", "FileName", "Filename", "file_name")
     COL_PROCESSED = pick_existing_header(col_index, "Processed", "processed", "Status", "status")
+
+    # Optional Thumbnail column
+    COL_THUMBNAIL = None
+    for candidate in ("Thumbnail", "thumbnail"):
+        if candidate in col_index:
+            COL_THUMBNAIL = candidate
+            break
 
     COL_IMAGE_16x9 = pick_existing_header(
         col_index,
@@ -200,12 +258,11 @@ def main():
     title = (row_data[col_index[COL_TITLE]] or "").strip()
     description = (row_data[col_index[COL_DESC]] or "").strip()
     filename = (row_data[col_index[COL_FILE]] or "").strip()
+    thumbnail_filename = (row_data[col_index[COL_THUMBNAIL]] or "").strip() if COL_THUMBNAIL else ""
     image16x9_id = (row_data[col_index[COL_IMAGE_16x9]] or "").strip()
 
     if not title or not filename:
         raise RuntimeError("Row is missing Title or File Name.")
-    if not image16x9_id:
-        raise RuntimeError("Row is missing Image16x9FileId (needed to render video).")
 
     # Local temp files
     os.makedirs("/tmp/dd", exist_ok=True)
@@ -216,14 +273,22 @@ def main():
     # Download from Drive
     audio_file_id = drive_find_file_id(drive_svc, EPISODES_FOLDER_ID, filename)
     drive_download_file(drive_svc, audio_file_id, local_audio)
-    drive_download_file(drive_svc, image16x9_id, local_image)
+
+    selected_image_file_id = resolve_thumbnail_file_id(
+        drive_svc=drive_svc,
+        thumbnails_folder_id=THUMBNAILS_FOLDER_ID,
+        thumbnail_filename=thumbnail_filename,
+        image16x9_id=image16x9_id,
+        fallback_image_file_id=FALLBACK_IMAGE_FILE_ID,
+    )
+    drive_download_file(drive_svc, selected_image_file_id, local_image)
 
     # Render video
     run_ffmpeg(local_image, local_audio, local_video)
 
     # Upload artifacts to bucket
     audio_blob_name = f"{BUCKET_EPISODES_PREFIX}/{today.isoformat()}/{filename}"
-    video_filename = filename.rsplit(".", 1)[0] + ".mp4"   # "1 Genesis 1.mp4"
+    video_filename = filename.rsplit(".", 1)[0] + ".mp4"
     video_blob_name = f"{BUCKET_EPISODES_PREFIX}/{today.isoformat()}/{video_filename}"
 
     blob_audio = bucket.blob(audio_blob_name)
