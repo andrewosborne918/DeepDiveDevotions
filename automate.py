@@ -310,6 +310,8 @@ def run_ffmpeg(
         image_path,
         "-i",
         audio_path,
+        "-vf",
+        "pad=ceil(iw/2)*2:ceil(ih/2)*2",
         "-c:v",
         "libx264",
         "-tune",
